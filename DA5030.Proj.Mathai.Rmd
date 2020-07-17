@@ -1,0 +1,246 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r}
+#load the required packages and libraries
+library(tidyverse)    #tidy data
+library(dplyr)        #clean or tidy the data
+library(ggplot2)      #visualize the data
+library(caret)        #Classification and regression training to create predictive models
+library(kernlab)      #Kernel based machine learning
+library(e1071)        #Statistical package
+library(corrplot)     #graphical display of correlation matrix
+library(ROCR)         #ROC graphs
+library(randomForest) #Random forest for classification and regression
+library(rpart)        #Recursive partitioning 
+library(class)        #Classification
+library(gmodels)      #Model Fitting
+library(caretEnsemble)#Ensemble Modelling
+```
+
+CRISP-DM
+
+1.BUISNESS UNDERSTANDING: The goal of the project is to predict breast cancer using machine learning classifiers
+
+2.DATA ACQUISIION
+```{r}
+#DATASET : Breast cancer Wisconsin (original) dataset from UCI Machine Learning (https://archive.ics.uci.edu/ml/machine-learning-databases/breast-cancer-wisconsin/)
+
+#load the dataset
+breast_cancer <- read.csv(file = "~/Downloads/breast-cancer-wisconsin.data", header = F, stringsAsFactors = F)
+head(breast_cancer)
+```
+
+
+3.DATA EXPLORATION
+```{r}
+#convert to a data frame
+breast_cancer <- as.data.frame(breast_cancer)
+head(breast_cancer)
+# Information about the variables
+# V1: Patient ID
+# V2: Clump thickness: 1- 10
+# V3: Uniformity of cell size: 1-10
+# V4: Uniformity of cell shape: 1-10
+# V5: Marginal Adhesion: 1-10
+# V6: Single Epthelial cell size: 1-10
+# V7: Bare Nuclei: 1-10
+# V8: Bland Chromatin: 1-10
+# V9: Normal Nuclei:1-10
+# V10:Mitosis:1-10
+# V11:Class: 2 for benign and 4 for malignant
+#change column names on the dataset
+colnames(breast_cancer) <- c("ID", "Clump thickness", "Uniformity of cell size", "Uniformity of cell shape", "Marginal Adhesion", "Single Epthelial cell size", "Bare Nuclei", "Bland Chromatin", "Normal Nuclei", "Mitosis", "Class")
+dim(breast_cancer)
+str(breast_cancer)
+```
+
+
+
+4. DATA CLEANING AND SHAPING
+```{r}
+#Convert bare nuclei from character to integer 
+breast_cancer$`Bare Nuclei` <- as.integer(breast_cancer$`Bare Nuclei`)
+#NAs introduced by coercion
+sum(is.na(breast_cancer)) #16 rows with NA values
+#remove rows that have NA values
+breast_cancer <- na.omit(breast_cancer)
+#check if NA values are removed
+sum(is.na(breast_cancer)) #0 rows with NA values
+#remove column ID from the dataset since it is not required for analysis
+breast_cancer$ID <- NULL
+dim(breast_cancer) #number of rows have changed from 699 to 683 and columns from 11 to 10
+
+#change 2 to Benign and 4 to Malignant
+#check the correlation between the variables
+corr_mat <- cor(breast_cancer, NULL, method = "pearson")
+corrplot(corr_mat) #positive correlation
+#convert 2 to benign and 4 to malignant
+breast_cancer$Class <- factor(breast_cancer$Class, levels = c(2, 4), labels = c("Benign", "Malignant"))
+summary(breast_cancer)
+
+#Creating Training (70%) and Testing (30%) data
+set.seed(3233) #set seed so that results are consistent
+sample   <- createDataPartition(breast_cancer$Class, p = 0.7, list = FALSE)
+bc_train <- breast_cancer[sample,  ]
+bc_test  <- breast_cancer[-sample, ]
+
+class_factor <- bc_test$Class
+```
+
+
+5.MODEL CONSTRUCTION AND EVALUATION
+
+1.Support Vector Machine (SVM) Classifier
+```{r}
+#svm function on the training dataset
+ctr1 <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+svm_classifier <- train(Class ~., 
+                    data       = bc_train,      #use train dataset
+                    method     = "svmLinear",   #use svmLinear
+                    trControl  = ctr1,
+                    preProcess = c("center", "scale"),
+                    tuneLength = 10)
+
+
+#predict function for predicted values on linear model
+#predict on testing dataset
+svm_pred <- predict(svm_classifier, newdata = bc_test)
+#confusionmatrix calculates observed and predicted values
+confusionMatrix(svm_pred, class_factor) #shows 98% accuracy
+
+#Plotting ROC and AUC
+#transform input data into a standardized format
+pred_val <- prediction(as.numeric(svm_pred), as.numeric(class_factor))
+#Measure the quality of prediction 
+perf_AUC <- performance(pred_val, "auc")
+AUC      <- perf_AUC@y.values[[1]]
+perf_ROC <- performance(pred_val, "tpr", "fpr")
+plot(perf_ROC, main = "ROCplot")
+text(0.5, 0.5, paste("AUC = ", format(AUC, digits = 3, scientific = FALSE)))
+abline(a = 0, b = 1, lwd = 2, lty = 2, col = "gray")
+```
+
+
+2. Random Forest (RF) Classifier
+```{r}
+rf_classifier <- train(Class ~.,  
+                       data = bc_train,  # Use the train data frame as the training data
+                       method = 'rf',    # Use the 'random forest' algorithm
+                       metric = "Accuracy",
+                       trControl = trainControl(method = 'cv', # Use cross-validation
+                       number = 5))
+
+
+
+rf_pred <- predict(rf_classifier, newdata = bc_test)
+confusionMatrix(rf_pred, class_factor) #shows 98% accuracy
+
+#Plotting ROC and AUC
+#transform input data into a standardized format
+pred_val <- prediction(as.numeric(rf_pred), as.numeric(class_factor))
+#Measure the quality of prediction 
+perf_AUC <- performance(pred_val, "auc")
+AUC      <- perf_AUC@y.values[[1]]
+perf_ROC <- performance(pred_val, "tpr", "fpr")
+plot(perf_ROC, main = "ROCplot")
+text(0.5, 0.5, paste("AUC = ", format(AUC, digits = 3, scientific = FALSE)))
+abline(a = 0, b = 1, lwd = 2, lty = 2, col = "gray")
+```
+
+
+3. Naive Bayes (NB) Classifier
+```{r}
+nb_classifier <- suppressWarnings(train(Class ~.,  
+                       data = bc_train,  # Use the train data frame as the training data
+                       method = 'nb',    #use naive bayes
+                       metric = "Accuracy",
+                       trControl = trainControl(method = 'cv', # Use cross-validation
+                       number = 5)))
+
+nb_predict    <- suppressWarnings(predict(nb_classifier, breast_cancer))
+confusionMatrix(nb_predict, breast_cancer$Class) #gives 97% accuracy
+
+```
+
+
+4. Decision Tree (DT) Classifier
+```{r}
+dt_classifier <- rpart(Class ~., 
+                       data = bc_train, 
+                       method = "class")
+
+
+dt_predict    <- predict(dt_classifier, newdata = bc_test, type = "class")
+confusionMatrix(dt_predict, class_factor) #92% accuracy
+#Plotting ROC and AUC
+#transform input data into a standardized format
+pred_val <- prediction(as.numeric(dt_predict), as.numeric(class_factor))
+#Measure the quality of prediction 
+perf_AUC <- performance(pred_val, "auc")
+AUC      <- perf_AUC@y.values[[1]]
+perf_ROC <- performance(pred_val, "tpr", "fpr")
+plot(perf_ROC, main = "ROCplot")
+text(0.5, 0.5, paste("AUC = ", format(AUC, digits = 3, scientific = FALSE)))
+abline(a = 0, b = 1, lwd = 2, lty = 2, col = "gray")
+```
+
+
+5. K-nearest neighbours (kNN) CLassifier
+```{r}
+knn_classifier <- train(Class ~ ., 
+                        data = bc_train, 
+                        method = "knn", 
+                        trControl = ctr1, 
+                        metric = "Accuracy",
+                        preProcess = c("center","scale"), tuneLength = 20)
+
+knn_pred <- predict(knn_classifier, newdata = bc_test)
+confusionMatrix(knn_pred, class_factor) #98% accuracy
+
+#Plotting ROC and AUC
+#transform input data into a standardized format
+pred_val <- prediction(as.numeric(knn_pred), as.numeric(class_factor))
+#Measure the quality of prediction 
+perf_AUC <- performance(pred_val, "auc")
+AUC      <- perf_AUC@y.values[[1]]
+perf_ROC <- performance(pred_val, "tpr", "fpr")
+plot(perf_ROC, main = "ROCplot")
+text(0.5, 0.5, paste("AUC = ", format(AUC, digits = 3, scientific = FALSE)))
+abline(a = 0, b = 1, lwd = 2, lty = 2, col = "gray")
+```
+
+
+6. Ensemble
+```{r}
+# Boosting Algorithms
+classifier <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+# C5.0
+set.seed(10)
+c5.0_classifier <-  train(Class~., 
+                    data   = breast_cancer, 
+                    method = "C5.0", 
+                    metric = "Accuracy", 
+                    trControl = classifier)
+# # Stochastic Gradient Boosting
+set.seed(10)
+gbm_classifier    <- train(Class~., 
+                     data    = breast_cancer, 
+                     methodc = "gbm", 
+                     metric  = "Accuracy", 
+                     trControl = classifier, 
+                     verbose = FALSE)
+# summarize results
+boosting_val <- resamples(list(c5.0 = c5.0_classifier, gbm = gbm_classifier))
+summary(boosting_val)
+dotplot(boosting_val)
+```
+
+
+
+
